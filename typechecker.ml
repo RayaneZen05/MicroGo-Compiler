@@ -43,8 +43,54 @@ let prog (fmt,ld) =
     if typ_e <> typ then type_error e.eloc typ_e typ
   and type_expr e tenv = match e.edesc with
     | Int _  -> TInt
-    | _ -> failwith "case not implemented in type_expr"
-
+    | String _ -> TString
+    | Bool _ -> TBool
+    (* à refactoriser, c'est beaucoup trop long *)
+    | Binop (op, e1, e2) -> match op with
+        | Eq | Neq ->
+            match (e1.edesc, e2.edesc) with
+            | (Nil, Nil) -> error e.eloc "Comparaison entre Nil et Nil"
+            | (Nil, _) -> let t2 = type_expr e2 tenv in match t2 with
+              | TStruct _ -> TBool
+              | _ -> error e.eloc (Printf.sprintf "Comparaison entre Nil et %s" (typ_to_string t2))
+            | (_, Nil) -> let t1 = type_expr e1 tenv in match t1 with
+              | TStruct _ -> TBool
+              | _ -> error e.eloc (Printf.sprintf "Comparaison entre Nil et %s" (typ_to_string t1))
+            | (_, _) ->
+            let t1 = type_expr e1 tenv in
+            let t2 = type_expr e2 tenv in 
+              if t1 = t2 then TBool
+              else (type_error e.eloc t2 t1) 
+        | Lt | Le | Gt | Ge ->
+          let t1 = type_expr e1 tenv in
+          let t2 = type_expr e2 tenv in 
+          if t1 = TInt then
+            if t2 = TInt then TBool
+            else type_error e.eloc t2 TInt
+          else type_error e.eloc t1 TInt
+        | Add | Sub | Mul | Div | Rem ->
+          let t1 = type_expr e1 tenv in
+          let t2 = type_expr e2 tenv in 
+          if t1 = TInt then
+            if t2 = TInt then TInt
+            else type_error e.eloc t2 TInt
+          else type_error e.eloc t1 TInt
+        | And | Or ->
+          let t1 = type_expr e1 tenv in
+          let t2 = type_expr e2 tenv in 
+          if t1 = TBool then
+            if t2 = TBool then TBool
+            else type_error e.eloc t2 TBool
+          else type_error e.eloc t1 TBool
+      | Unop (op, e) -> match op with
+        | Opp -> let t = type_expr e tenv in 
+        if t = TInt then TInt else type_error e.eloc t TInt
+        | Not -> let t = type_expr e tenv in 
+        if t = TBool then TBool else type_error e.eloc t TBool
+      | Var id ->
+        try Env.find id.id tenv
+        with Not_found -> error id.loc (Printf.sprintf "La variable %s n'est pas déclarée" id.id)
+      (* !!!!!!! Il reste Dot Nil New Call Print !!!!!!!!*)
   in
 
   let rec check_instr i ret tenv = match i.idesc with

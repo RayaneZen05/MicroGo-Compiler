@@ -59,7 +59,7 @@ import_fmt:
 decl:
 | TYPE id=ident STRUCT BEGIN fl=loption(fields) END SEMI
     { Struct { sname = id; fields = List.flatten fl; } }
-| FUNC id=ident LPAR vst=varstyps RPAR rt=ret_type BEGIN il=bloc END SEMI
+| FUNC id=ident LPAR vst=varstyps RPAR rt=ret_type il=bloc SEMI
     { Fun { fname = id; params = List.flatten vst; return = rt; body = il} }
 ;
 
