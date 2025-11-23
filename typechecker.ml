@@ -17,7 +17,7 @@ module Env = Map.Make(String)
     
 type tenv = typ Env.t
 type fenv = (typ list) * (typ list) Env.t
-type senv = (ident * typ) list
+type senv = (ident * typ) list Env.t
 
 let dummy = "_"
 
@@ -82,19 +82,50 @@ let prog (fmt,ld) =
             if t2 = TBool then TBool
             else type_error e.eloc t2 TBool
           else type_error e.eloc t1 TBool
-      | Unop (op, e) -> match op with
-        | Opp -> let t = type_expr e tenv in 
-        if t = TInt then TInt else type_error e.eloc t TInt
-        | Not -> let t = type_expr e tenv in 
-        if t = TBool then TBool else type_error e.eloc t TBool
-      | Var id ->
-        try Env.find id.id tenv
-        with Not_found -> error id.loc (Printf.sprintf "La variable %s n'est pas déclarée" id.id)
-      (* !!!!!!! Il reste Dot Nil New Call Print !!!!!!!!*)
+    | Unop (op, e) -> match op with
+      | Opp -> let t = type_expr e tenv in 
+      if t = TInt then TInt else type_error e.eloc t TInt
+      | Not -> let t = type_expr e tenv in 
+      if t = TBool then TBool else type_error e.eloc t TBool
+    | Var id ->
+      try Env.find id.id tenv
+      with Not_found -> error id.loc (Printf.sprintf "La variable %s n'est pas déclarée" id.id)
+    | Dot (e, id) ->
+      match e.edesc with
+        | Nil -> error e.eloc "accés illégal à un champ d'un pointeur Nil"
+        | _ ->
+          let t_e = type_expr e tenv in match t_e with
+          | TStruct s -> let il = Env.find s senv in (*  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! On pourrait wrap (Env.find s)<= senv dans une fonction permettant de renvoyer l'erreur localisée !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*)
+          let rec aux identtyplist = match identtyplist with
+            | [] -> error e.eloc "type not found in struct" 
+            | (id2, ty_id2) :: tl -> if id.id = id2.id then ty_id2
+                                      else aux tl
+            in aux il   
+            | _ -> error e.eloc 
+            (Printf.sprintf "Struct pointer expected, got %s" (typ_to_string t_e))
+    | New s -> if Env.mem s senv then TStruct s else error e.eloc (Printf.sprintf "Struct %s doesn't exist" s)
+    | Call (id, args) -> 
+      let (params_ty, return_ty) = Env.find id.id fenv in
+      let args_types = List.map (fun arg -> type_expr arg tenv) args in
+      try
+        let l = List.combine params_ty args_types in
+        let comp_or_err (typ1,typ2) =
+          if typ1 = typ2 then () else type_error e.eloc typ2 typ1
+        in 
+        List.iter comp_or_err l;
+        match return_ty with
+        | [] -> error e.eloc (Printf.sprintf "function %s returns void" id.id)
+        | [typret] -> typret
+        | _ -> error e.eloc (Printf.sprintf "function %s has type arity higher than 1" id.id)
+      with Invalid_argument ->
+        error e.eloc (Printf.sprintf "wrong number of arguments for function %s" id.id)
+        (* ON GERE PRINT OU PAS ?*)
   in
 
   let rec check_instr i ret tenv = match i.idesc with
-    | _ -> failwith "case not implemented in check_instr"
+  | Set (el1, el2) ->
+    |  failwith "à faire"
+    
   and check_seq s ret tenv =
     List.iter (fun i -> check_instr i ret tenv) s
   in
