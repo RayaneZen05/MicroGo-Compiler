@@ -305,3 +305,4 @@ let prog (fmt,ld) =
         but an expression was expected of type func_def Env.t
         Type typ list * typ list is not compatible with type func_def
      *)
+     (* RESTE A FAIRE : régle import fmt <=> (ssi) utilisation de fmt.Print*)
