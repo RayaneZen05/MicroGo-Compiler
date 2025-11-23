@@ -30,12 +30,26 @@ let prog (fmt,ld) =
     List.fold_left
       (fun (fenv,senv) d ->
          match d with Struct(s) -> (fenv, Env.add s.sname.id s.fields senv)
-                    | Fun(f)   -> failwith "à compléter")
+                    | Fun(f)   -> let params_ty = List.map snd f.params in 
+                                  let return_ty = f.return in
+                                  (Env.add f.fname.id (params_ty, return_ty) fenv, senv))
       (Env.empty, Env.empty) ld
   in
-  let check_typ t = failwith "case not implemented in check_typ"
+  let check_typ t = match t with
+    | TStruct s ->
+      if Env.mem s senv then ()
+      else error (dummy, dummy) (Printf.sprintf "Unknown structure %s" s)
+    | _ -> ()
   in
-  let check_fields lf = failwith "case not implemented in check_fields"
+  let check_fields lf = 
+    let rec aux seen = function
+      | [] -> ()
+      | (id, t) :: tl ->
+          if List.mem id.id seen then 
+             error id.loc (Printf.sprintf "Duplicate field %s" id.id);
+          check_typ t;
+          aux (id.id :: seen) tl
+    in aux [] lf
   in
   let rec check_expr e typ tenv =
     if e.edesc = Nil then  failwith "case not implemented in check"
@@ -117,22 +131,151 @@ let prog (fmt,ld) =
         | [] -> error e.eloc (Printf.sprintf "function %s returns void" id.id)
         | [typret] -> typret
         | _ -> error e.eloc (Printf.sprintf "function %s has type arity higher than 1" id.id)
-      with Invalid_argument ->
+      with Invalid_argument _ ->
         error e.eloc (Printf.sprintf "wrong number of arguments for function %s" id.id)
         (* ON GERE PRINT OU PAS ?*)
   in
 
   let rec check_instr i ret tenv = match i.idesc with
-  | Set (el1, el2) ->
-    |  failwith "à faire"
+  | Expr e -> match e.edesc with
+    | Call (id, args) -> let (params_ty, return_ty) = Env.find id.id fenv in
+    let args_types = List.map (fun arg -> type_expr arg tenv) args in
+    try
+      let l = List.combine params_ty args_types in
+      let comp_or_err (typ1,typ2) =
+        if typ1 = typ2 then () else type_error e.eloc typ2 typ1
+      in 
+      List.iter comp_or_err l
+      with Invalid_argument _ ->
+      error e.eloc (Printf.sprintf "wrong number of arguments for function %s" id.id)
+    | _ -> let _ = type_expr e tenv in () 
+  | If (cond, b1, b2) -> 
+      check_expr cond TBool tenv;
+      check_seq b1 ret tenv;
+      check_seq b2 ret tenv
+  | For (cond, b) ->
+      check_expr cond TBool tenv;
+      check_seq b ret tenv
+  | Return (el) ->
+    let rec aux el =
+      match el with
+      (* On distingue le renvoi d'un appel de fonction *)
+      | [{ edesc = Call (id, args); eloc = l}] ->
+        let (params_ty, return_ty) = Env.find id.id fenv in
+        let args_types = List.map (fun arg -> type_expr arg tenv) args in
+        try
+          let l = List.combine params_ty args_types in
+          let comp_or_err (typ1,typ2) =
+            if typ1 = typ2 then () else type_error l typ2 typ1
+          in 
+          List.iter comp_or_err l;
+        with Invalid_argument _ ->
+          error e.eloc (Printf.sprintf "wrong number of arguments for function %s" id.id);
+        try
+          let pairs = List.combine return_ty ret in
+            List.iter (fun (t1, t2) -> if t1 = t2 then () else type_error l t2 t1) pairs
+        with Invalid_argument _ ->
+          error l (Printf.sprintf "wrong number of return values for function %s" id.id);
+      | _ -> try
+          let pairs = List.combine el ret in
+            List.iter (fun (e, expected_typ) -> check_expr e expected_typ tenv) pairs
+        with Invalid_argument _ -> error i.iloc "Wrong number of return values"
+  | Set (lval, rval) ->
+    (* On check les lvalue *)
+    let rec check_lvalue e = match e.edesc with
+      | Var _ -> ()
+      | Dot (eprime, _) -> check_lvalue eprime
+      | _ -> error e.eloc "assigning an rvalue to a non-lvalue"
+    in 
+    List.iter check_lvalue lval;
+    (* Calcul des types attendus *)
+    let ltypes = List.map (fun e -> type_expr e tenv) lval in
+    match rval with
+    | [{edesc = Call (id, args); eloc = l}] ->
+      let (params_ty, rt) = Env.find id.id fenv in
+      let args_types = List.map (fun arg -> type_expr arg tenv) args in
+    begin try
+      let lp = List.combine params_ty args_types in
+      List.iter (fun (typ1, typ2) -> if typ1 = typ2 then () else type_error l typ2 typ1) lp
+    with Invalid_argument _ ->
+      error l (Printf.sprintf "wrong number of arguments for function %s" id.id)
+    end;
+    begin try
+        let pairs = List.combine ltypes rt in
+        List.iter (fun (t1, t2) -> if t1 = t2 then () else type_error l t2 t1) pairs
+      with Invalid_argument _ ->
+        error l (Printf.sprintf "wrong number of return values for function %s" id.id)
+    end
+    | _ -> let rtypes = List.map (fun e -> type_expr e tenv) rval in
+      try
+        let pairs = List.combine ltypes rtypes in
+        List.iter (fun (t1, t2) -> if t1 = t2 then () else type_error i.iloc t2 t1)
+      with Invalid_argument _ ->
+        error i.iloc "wrong number of rvalues"
+  | Vars (il, typ_opt, b) ->
+    match typ_opt with
+    | Some t -> let new_tenv =
+        let idxtlist = List.map (fun id -> (id.id, t)) il
+        in add_env idxtlist tenv
+      in check_seq b ret new_tenv
+    | None -> match b with
+      | {idesc=Set(_, rval); _} :: tl -> 
+        (* On récupére la rval *)
+        let rtypes = match rval with
+         | [{edesc = Call (id, args); eloc = l}] ->
+          let (params_ty, rt) = Env.find id.id fenv in
+              let args_types = List.map (fun arg -> type_expr arg tenv) args in
+              begin try
+                let lp = List.combine params_ty args_types in
+                List.iter (fun (expected, actual) -> 
+                  if expected = actual then () else type_error l actual expected
+                ) lp
+              with Invalid_argument _ ->
+                error l (Printf.sprintf "wrong number of arguments for function %s" id.id)
+              end;
+              rt (* On renvoie les tpes pour rtypes *)
+          
+          List.map (fun e -> type_expr e tenv) rval in
+        try
+          let newVars = List.combine (List.map (fun i -> i.id) il) rtypes in
+          let new_tenv = add_env newVars tenv in
+          check_seq tl ret new_tenv 
+        with Invalid_argument _ ->
+          error i.iloc "number of variables does not match number of values"
+      | [] -> error i.iloc "variable declaration must have an initialization" (* Voir sujet pour verif *)
+
+
+
+
+
+      
     
   and check_seq s ret tenv =
     List.iter (fun i -> check_instr i ret tenv) s
   in
   
-  let check_function f = failwith "case not implemented in check_function"
+  let check_function f = 
+    let params_map = List.map (fun (id, t) -> (id.id, t)) f.params in
+    let new_tenv = add_env params_map Env.empty in
+    check_seq f.body f.return new_tenv; (* On vérifie le corps *)
+    (* Fonction auxiliaire permettant de vérifier que la fonction termine toujours sur un 
+       return dans toutes ses branches *)
+    let rec terminates instr_list =
+      match instr_list with
+      | [] -> false (* Pas de return *)
+      | i :: tl ->
+          let i_terminates = match i.idesc with
+            | Return _ -> true
+            | Block b -> terminates b
+            | If(_, b1, b2) -> (terminates b1) && (terminates b2)
+            (* Si on a un for, le retour n'est pas garanti ? *)
+            | _ -> false
+          in
+          if i_terminates then true else terminates tl
+        in
+        if f.return <> [] && not (terminates f.body) then
+          error f.fname.loc "A return statement is missing in function body"
+
 
   in Env.iter (fun _ lf -> check_fields lf) senv;
      Env.iter (fun _ fd -> check_function fd) fenv
-
-
