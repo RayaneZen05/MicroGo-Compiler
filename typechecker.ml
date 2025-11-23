@@ -121,7 +121,7 @@ let prog (fmt,ld) =
     | Call (id, args) -> 
       let (params_ty, return_ty) = Env.find id.id fenv in
       let args_types = List.map (fun arg -> type_expr arg tenv) args in
-      (try (* <--- PARENTHÈSE OUVRANTE ICI *)
+      (try
         let l = List.combine params_ty args_types in
         let comp_or_err (typ1,typ2) =
           if typ1 = typ2 then () else type_error e.eloc typ2 typ1
@@ -132,7 +132,7 @@ let prog (fmt,ld) =
         | [typret] -> typret
         | _ -> error e.eloc (Printf.sprintf "function %s has type arity higher than 1" id.id)
       with Invalid_argument _ ->
-        error e.eloc (Printf.sprintf "wrong number of arguments for function %s" id.id)) (* <--- PARENTHÈSE FERMANTE ICI *)
+        error e.eloc (Printf.sprintf "wrong number of arguments for function %s" id.id))
     | Nil -> error e.eloc "nil must be used in a context"
     | Print el ->
         (match el with
@@ -305,3 +305,4 @@ let prog (fmt,ld) =
         but an expression was expected of type func_def Env.t
         Type typ list * typ list is not compatible with type func_def
      *)
+     (* RESTE A FAIRE : régle import fmt <=> (ssi) utilisation de fmt.Print*)
