@@ -295,7 +295,8 @@ let prog (fmt,ld) =
 
 
   in Env.iter (fun _ lf -> check_fields lf) senv;
-     List.iter (function Fun f -> check_function f | _ -> ()) ld
+     List.iter (function Fun f -> check_function f | _ -> ()) ld;
+     ld
      (* On itére sur tout l'AST, et quand on tombe sur une fonction on appelle check_function, comme ca on
         conserve l'accés à fenv dans check_function et au corps de la fonction
         Sinon on a l'erreur suivante : 
@@ -305,4 +306,6 @@ let prog (fmt,ld) =
         but an expression was expected of type func_def Env.t
         Type typ list * typ list is not compatible with type func_def
      *)
-     (* RESTE A FAIRE : régle import fmt <=> (ssi) utilisation de fmt.Print*)
+     (* RESTE A FAIRE : 
+     - régle import fmt <=> (ssi) utilisation de fmt.Print
+     - dans PARSER : s'assurer q u'on a bien une fonction main*)

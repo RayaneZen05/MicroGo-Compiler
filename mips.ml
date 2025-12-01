@@ -13,6 +13,7 @@ let a0 = "$a0"
 let v0 = "$v0"
 let sp = "$sp"
 let ra = "$ra"
+let fp = "$fp" (* ajout de ce registre *)
 (* let zero = "$zero" On en a besoin ou pas ? C'est mieux si on peut s'en passer *)
 
 open Printf

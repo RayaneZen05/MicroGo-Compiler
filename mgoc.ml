@@ -34,15 +34,22 @@ let () =
     let f = Mgoparser.prog Mgolexer.token lb in
     close_in c;
     if !parse_only then exit 0;
-    let f = Typechecker.prog  f in
+    let f = Typechecker.prog f in
     if !type_only then exit 0;
-
+    let code = Compile.tr_prog f in
+    let c = open_out (Filename.chop_suffix file ".go" ^ ".s") in
+    Mips.print_program c code;
+    close_out c
   with
     | Mgolexer.Error s ->
 	report_loc (lexeme_start_p lb, lexeme_end_p lb);
 	eprintf "lexical error: %s\n@." s;
 	exit 1
     | Mgoparser.Error ->
+	report_loc (lexeme_start_p lb, lexeme_end_p lb);
+	eprintf "syntax error\n@.";
+	exit 1
+    | Parsing.Parse_error ->
 	report_loc (lexeme_start_p lb, lexeme_end_p lb);
 	eprintf "syntax error\n@.";
 	exit 1
