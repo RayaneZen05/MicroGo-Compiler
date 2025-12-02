@@ -140,15 +140,57 @@ and tr_instr i venv ofs = match i.idesc with
       in 
       loc_vars il venv ofs
       @@ addi sp sp (4 * List.length il)
-  | Return (el) -> begin match el with (* TODO: Gérer valeurs multiples *)
-      | [e] -> 
-        tr_expr e venv (* on charge la valeur de retour dans t0 *)
-        @@ addi sp fp (-4)
-        @@ pop ra
-        @@ pop fp
-        @@ jr ra 
-      | _ -> failwith "On verra ça aprés ?"
-      end;
+  | Return (el) -> 
+      let n = List.length el in
+      let calcule_ret =
+        match el with 
+      | []  -> li t0 0
+      | [e] -> tr_expr e venv (* on charge la valeur de retour dans t0 *)
+      | _ -> 
+          li a0 (n * 4) (* Appel sys pour allouer le bloc qui contiendra les valeurs *)
+          @@ li v0 9
+          @@ syscall
+          @@ move t1 v0 
+          @@ fst (List.fold_left (fun (code, idx) e ->
+            let c = 
+              code
+              @@ push t1 (* on évite d'écraser l'@ du bloc *)
+              @@ tr_expr e venv
+              @@ pop t1
+              @@ sw t0 (idx * 4) t1 (* On écrit t0 dans bloc[idx] *)
+            in (c, idx+1)) (nop, 0) el) @@ move t0 t1   
+      (* épilogue *)
+      in calcule_ret
+      @@ addi sp fp (-4)
+      @@ pop ra
+      @@ pop fp
+      @@ jr ra
+  | Set (lvals, [{edesc = Call(f, args); _} as call]) when List.length lvals > 1 ->
+      (* on a l'adresse du nuplet dans t0*)
+      let code_call = tr_expr call venv in
+      let code_save = push t0 in
+      let code_assign =
+        fst (List.fold_left (fun (code, i) lval -> 
+          let load_val = 
+            lw t1 0 sp
+            @@ lw t0 (i*4) t1
+         in
+         let assign = match lval.edesc with
+           | Var(id) ->
+               if Env.mem id.id venv then
+                 let ofs = Env.find id.id venv in sw t0 ofs fp
+               else
+                 la t1 id.id @@ sw t0 0 t1
+           | Dot(e, id) -> 
+               let ofs = Hashtbl.find field_offsets id.id in
+               push t0
+               @@ tr_expr e venv
+               @@ pop t1
+               @@ sw t1 ofs t0
+           | _ -> failwith "Assigning to non-lvalue"
+           in 
+          (code, i+1)) (nop, 0) lvals)
+        in code_call @@ code_save @@ code_assign @@ addi sp sp 4
   | Set (lval, rval) ->
       begin try
         let rec aux lvars = 
@@ -194,7 +236,7 @@ and tr_instr i venv ofs = match i.idesc with
         with Not_found -> failwith ("Unknown field" ^ id.id) in
         tr_expr e venv
         @@ lw t1 ofs t0
-        @@ addi t0 t0 1
+        @@ addi t1 t1 1
         @@ sw t1 ofs t0
        | _ -> failwith "trying to increment non-lvalue"
     end;
@@ -212,7 +254,7 @@ and tr_instr i venv ofs = match i.idesc with
         with Not_found -> failwith ("Unknown field" ^ id.id) in
         tr_expr e venv
         @@ lw t1 ofs t0
-        @@ addi t0 t0 (-1)
+        @@ addi t1 t1 (-1)
         @@ sw t1 ofs t0
       | _ -> failwith "trying to decrement non-lvalue"
 
