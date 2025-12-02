@@ -1,6 +1,19 @@
 open Mgoast
 open Mips
 module Env = Map.Make(String) (* On va utiliser des maps pour gérer les décalages de pile *)
+let struct_sizes  = Hashtbl.create 10
+let field_offsets = Hashtbl.create 20
+
+(* On remplie les tables *)
+let collect_structs declarations =
+  List.iter (function
+  | Struct s -> 
+      let size = 4 * List.length s.fields in
+      Hashtbl.add struct_sizes s.sname.id size;
+      
+      List.iteri (fun i (id, _) -> Hashtbl.add field_offsets id.id (i*4)) s.fields
+  | _ -> ()
+    ) declarations
 let data_segment = ref Mips.nop (* On initialise le segment .data vide *)
 let new_label =
   let cpt = ref (-1) in
@@ -25,7 +38,7 @@ let rec tr_expr e venv = match e.edesc with
   | Var(id) ->
     begin try 
     let ofs = Env.find id.id venv in
-    lw t0 ofs sp
+    lw t0 ofs fp
     with Not_found -> failwith (Printf.sprintf "undefined variable %s" id.id) (* Envisager de mieux gérer les erreurs ensuite *)
     end;
     | Binop(bop, e1, e2) ->
@@ -66,7 +79,12 @@ let rec tr_expr e venv = match e.edesc with
       (* nettoyage de la pile *)
       let code_clean = addi sp sp (4 * (List.length args)) in
       call_args @@ code_call @@ code_clean
-  | New s -> failwith "à faire" 
+  | New s -> let size = try Hashtbl.find struct_sizes s 
+                 with Not_found -> failwith ("Unknown struct " ^ s) in
+      li a0 size    (* appel système pour alloc mémoire*)
+      @@ li v0 9      
+      @@ syscall     
+      @@ move t0 v0  
   | Print (el) ->
     let code_print = List.fold_left (fun acc e ->
       acc 
@@ -79,6 +97,11 @@ let rec tr_expr e venv = match e.edesc with
       @@ syscall
     ) nop el in
     code_print @@ li t0 0
+    | Dot (e, id) -> 
+      let ofs = try Hashtbl.find field_offsets id.id
+    with Not_found -> failwith ("Unknown field" ^ id.id) in
+    tr_expr e venv
+    @@ lw t0 ofs t0
 
 
 let rec tr_seq s venv ofs = match s with
@@ -142,6 +165,15 @@ and tr_instr i venv ofs = match i.idesc with
               (*la t1 id.id
               @@ sw t0 0 t1*)
               failwith "plus tard..."
+          | Dot(e, id) ->
+            let ofs = try Hashtbl.find field_offsets id.id
+          with Not_found -> failwith ("Unknown field" ^ id.id) in
+            tr_expr e venv
+            @@ push t0
+            @@ tr_expr rv venv
+            @@ pop t1
+            @@ sw t0 ofs t1
+            @@ aux t
           | _ -> failwith "wrong lvalue"
           end;
         | [] -> Mips.nop
@@ -198,5 +230,10 @@ let rec tr_ldecl = function
   | [] -> nop
   
 let tr_prog p =  
+  collect_structs p;
   let code_text = tr_ldecl p in (* On s'assure du bon ordre d'évaluation *)
-  { text = code_text ; data = !data_segment }
+  let code_entry = jal "main" (* on saute à main *)
+  @@ li v0 10 (* appel system de sortie *)
+  @@ syscall 
+in 
+  { text = code_entry @@ code_text ; data = !data_segment }
