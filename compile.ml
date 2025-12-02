@@ -190,6 +190,12 @@ and tr_instr i venv ofs = match i.idesc with
         @@ sw t0 v fp
       with Not_found -> failwith (Printf.sprintf "%s value not found" id.id)
       end;
+       | Dot (e, id) -> let ofs = try Hashtbl.find field_offsets id.id
+        with Not_found -> failwith ("Unknown field" ^ id.id) in
+        tr_expr e venv
+        @@ lw t1 ofs t0
+        @@ addi t0 t0 1
+        @@ sw t1 ofs t0
        | _ -> failwith "trying to increment non-lvalue"
     end;
     | Dec e -> match e.edesc with
@@ -201,6 +207,13 @@ and tr_instr i venv ofs = match i.idesc with
         @@ sw t0 v fp
       with Not_found -> failwith "Printf.sprintf '%s value not found' id.id" (*régler*)
     end;
+      | Dot (e, id) ->
+        let ofs = try Hashtbl.find field_offsets id.id
+        with Not_found -> failwith ("Unknown field" ^ id.id) in
+        tr_expr e venv
+        @@ lw t1 ofs t0
+        @@ addi t0 t0 (-1)
+        @@ sw t1 ofs t0
       | _ -> failwith "trying to decrement non-lvalue"
 
 let tr_fun df =
