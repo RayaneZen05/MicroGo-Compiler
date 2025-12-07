@@ -3,7 +3,7 @@ open Mips
 module Env = Map.Make(String) (* On va utiliser des maps pour gérer les décalages de pile *)
 let struct_sizes  = Hashtbl.create 10
 let field_offsets = Hashtbl.create 20
-
+let func_returns  = Hashtbl.create 20 (* C'est juste pour pouvoir print des n-uplets, coûte une passe compléte du programme*)
 (* On remplie les tables *)
 let collect_structs declarations =
   List.iter (function
@@ -14,6 +14,12 @@ let collect_structs declarations =
       List.iteri (fun i (id, _) -> Hashtbl.add field_offsets id.id (i*4)) s.fields
   | _ -> ()
     ) declarations
+let collect_funcs declarations =
+  List.iter (function
+    | Fun f -> 
+        Hashtbl.add func_returns f.fname.id (List.length f.return)
+    | _ -> ()
+  ) declarations
 let data_segment = ref Mips.nop (* On initialise le segment .data vide *)
 let new_label =
   let cpt = ref (-1) in
@@ -89,12 +95,24 @@ let rec tr_expr e venv = match e.edesc with
     let code_print = List.fold_left (fun acc e ->
       acc 
       @@ tr_expr e venv
-      @@ move a0 t0
       @@ (match e.edesc with
-          | String _ -> li v0 4
-          | _ -> li v0 1
+      | String _ -> move a0 t0 @@ li v0 4 @@ syscall
+      | Call (id, _) -> let nb_ret = try Hashtbl.find func_returns id.id with Not_found -> 1 in
+        if nb_ret > 1 then
+          move t1 t0
+          @@ (
+            let rec print_tuple i =
+              if i >= nb_ret then nop
+              else
+                lw a0 (i*4) t1
+                @@ li v0 1
+                @@ syscall
+                @@ print_tuple (i+1)
+              in print_tuple 0
           )
-      @@ syscall
+            else
+              move a0 t0 @@ li v0 1 @@ syscall
+        | _ -> move a0 t0 @@ li v0 1 @@ syscall) 
     ) nop el in
     code_print @@ li t0 0
     | Dot (e, id) -> 
@@ -286,6 +304,7 @@ let rec tr_ldecl = function
   
 let tr_prog p =  
   collect_structs p;
+  collect_funcs p;
   let code_text = tr_ldecl p in (* On s'assure du bon ordre d'évaluation *)
   let code_entry = jal "main" (* on saute à main *)
   @@ li v0 10 (* appel system de sortie *)

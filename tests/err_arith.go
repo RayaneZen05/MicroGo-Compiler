@@ -18,4 +18,4 @@ func main() {
     // Erreur : opération logique sur des entiers
     // expected bool, got int
     var res bool = (1 && 0);
-}
+};
