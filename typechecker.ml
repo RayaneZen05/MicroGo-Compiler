@@ -308,4 +308,5 @@ let prog (fmt,ld) =
      *)
      (* RESTE A FAIRE : 
      - régle import fmt <=> (ssi) utilisation de fmt.Print
-     - dans PARSER : s'assurer q u'on a bien une fonction main*)
+     - dans PARSER : s'assurer qu'on a bien une fonction main
+      On n'a pas géré le fait de voir si on a une fonction main, car MIPS nous dira déja missing symbol main*)
